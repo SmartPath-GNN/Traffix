@@ -28,9 +28,14 @@ def oznitelik_muhendisligi():
     sutunlar_normalize = ['AVERAGE_SPEED', 'NUMBER_OF_VEHICLES']
     df[['NORM_SPEED', 'NORM_VEHICLES']] = scaler.fit_transform(df[sutunlar_normalize])
     
-    print("4. Modelin ihtiyaç duymadığı geçici veriler temizleniyor...")
-    # Yapay zekaya doğrudan girmeyecek olan orijinal metin ve raw id sütunlarını atıyoruz
-    temizlenecekler = ['DATE_TIME', 'osmnx_node_id', 'AVERAGE_SPEED', 'NUMBER_OF_VEHICLES']
+    print("4. Veri kronolojik olarak sıralanıyor ve geçici veriler temizleniyor...")
+    
+    # LSTM'in zaman pencerelerini doğru kurabilmesi için zaman ve düğüme göre sıralıyoruz
+    df = df.sort_values(by=['DATE_TIME', 'gnn_node_id'])
+    
+    # DATE_TIME sütununu model ekibine referans olarak bırakıyoruz
+    temizlenecekler = ['osmnx_node_id', 'AVERAGE_SPEED', 'NUMBER_OF_VEHICLES']
+
     df = df.drop(columns=[col for col in temizlenecekler if col in df.columns])
 
     print("5. Son veri seti kaydediliyor...")
