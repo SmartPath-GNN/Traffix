@@ -43,5 +43,28 @@ def evaluate_naive_baseline(dataloader, target_col_indices):
 
     baseline_mae = calculate_mae(all_targets, all_predictions)
     baseline_rmse = calculate_rmse(all_targets, all_predictions)
+    baseline_r2 = calculate_r2(all_targets, all_predictions)
 
-    return baseline_mae, baseline_rmse
+    return baseline_mae, baseline_rmse,baseline_r2
+
+
+def calculate_r2(y_true, y_pred):
+    """
+    R2 Score: Determination Coefficient
+
+    Modelin gerçek değerleri ne kadar iyi açıkladığını gösterir.
+
+    R2 = 1'e yakınsa model çok iyi açıklıyor.
+    R2 = 0 civarındaysa model ortalama tahmin kadar iyi.
+    R2 < 0 ise model kötü tahmin ediyor olabilir.
+
+    Bu fonksiyon multi-output yapı için de çalışır.
+    Yani hem NORM_SPEED hem de NORM_VEHICLES birlikte değerlendirilir.
+    """
+
+    ss_res = torch.sum((y_true - y_pred) ** 2)
+    ss_tot = torch.sum((y_true - torch.mean(y_true)) ** 2)
+
+    r2 = 1 - (ss_res / ss_tot)
+
+    return r2.item()

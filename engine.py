@@ -1,5 +1,5 @@
 import torch
-from metrics import calculate_mae, calculate_rmse
+from metrics import calculate_mae, calculate_rmse,calculate_r2
 
 
 def train_one_epoch(model, dataloader, edge_index, edge_weight, optimizer, loss_fn, device):
@@ -55,5 +55,6 @@ def evaluate(model, dataloader, edge_index, edge_weight, loss_fn, device):
 
     mae = calculate_mae(all_targets, all_predictions)
     rmse = calculate_rmse(all_targets, all_predictions)
+    r2 = calculate_r2(all_targets, all_predictions)
 
-    return total_loss / len(dataloader), mae, rmse
+    return total_loss / len(dataloader), mae, rmse,r2

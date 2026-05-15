@@ -134,7 +134,7 @@ def main():
             device=device
         )
 
-        val_loss, val_mae, val_rmse = evaluate(
+        val_loss, val_mae, val_rmse,val_r2 = evaluate(
             model=model,
             dataloader=val_loader,
             edge_index=edge_index,
@@ -149,6 +149,7 @@ def main():
             f"Val Loss: {val_loss:.6f} | "
             f"Val MAE: {val_mae:.6f} | "
             f"Val RMSE: {val_rmse:.6f}"
+            f"Val R2: {val_r2:.6f}"
         )
 
         early_stopping(val_loss, model)
@@ -163,7 +164,7 @@ def main():
         torch.load("best_gnn_lstm_model.pt", map_location=device)
     )
 
-    test_loss, test_mae, test_rmse = evaluate(
+    test_loss, test_mae, test_rmse,test_r2 = evaluate(
         model=model,
         dataloader=test_loader,
         edge_index=edge_index,
@@ -176,10 +177,11 @@ def main():
     print(f"-> Test MSE Loss: {test_loss:.6f}")
     print(f"-> Test MAE     : {test_mae:.6f}")
     print(f"-> Test RMSE    : {test_rmse:.6f}")
+    print(f"-> Test R2      : {test_r2:.6f}")
 
     print("\n7. Naive Baseline ile karşılaştırma yapılıyor...")
 
-    baseline_mae, baseline_rmse = evaluate_naive_baseline(
+    baseline_mae, baseline_rmse,baseline_r2 = evaluate_naive_baseline(
         dataloader=test_loader,
         target_col_indices=target_indices
     )
@@ -187,12 +189,14 @@ def main():
     print("\nNaive Baseline Test Sonuçları:")
     print(f"-> Baseline MAE : {baseline_mae:.6f}")
     print(f"-> Baseline RMSE: {baseline_rmse:.6f}")
+    print(f"-> Baseline R2  : {baseline_r2:.6f}")
 
     print("\nModel ve Baseline Karşılaştırması:")
     print(f"-> Model MAE    : {test_mae:.6f}")
     print(f"-> Baseline MAE : {baseline_mae:.6f}")
     print(f"-> Model RMSE   : {test_rmse:.6f}")
     print(f"-> Baseline RMSE: {baseline_rmse:.6f}")
+    print(f"-> Baseline R2   : {baseline_r2:.6f}")
 
     print("\nİşlem tamamlandı.")
     print("En iyi model dosyası: best_gnn_lstm_model.pt")
