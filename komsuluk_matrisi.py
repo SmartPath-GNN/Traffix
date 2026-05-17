@@ -46,7 +46,17 @@ def veri_setini_hazirla():
     # [2, num_edges] formatında, int tipinde GNN kenar matrisi
     edge_index_tensor = torch.tensor([kaynak_dugumler, hedef_dugumler], dtype=torch.long)
     # [num_edges] formatında, float tipinde kenar ağırlıkları
-    edge_weight_tensor = torch.tensor(kenar_agirliklari, dtype=torch.float32)
+    edge_weight_array = np.array(kenar_agirliklari, dtype=np.float32)
+    # Uzunluk arttıkça ağırlık azalsın
+    edge_weight_array = 1.0 / (edge_weight_array + 1e-8)
+    # Sonra normalize et
+    edge_weight_array = (
+    edge_weight_array - edge_weight_array.min()
+    ) / (
+    edge_weight_array.max() - edge_weight_array.min() + 1e-8
+    )
+    edge_weight_tensor = torch.tensor(edge_weight_array, dtype=torch.float32)
+
 
     print("6. Özellik (X) Matrisi CSV'den yükleniyor ve 3D LSTM Küpüne dönüştürülüyor...")
     # Hazırladığın CSV dosyasını okuyoruz

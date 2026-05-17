@@ -10,15 +10,24 @@ class TrafficSlidingWindowDataset(Dataset):
         [Zaman, Düğüm, Özellik]
     """
 
-    def __init__(self, data_x, window_size, target_col_indices, start_index, end_index):
+    def __init__(
+        self,
+        data_x,
+        window_size,
+        target_col_indices,
+        start_index,
+        end_index,
+        horizon=1
+    ):
         self.data_x = data_x
         self.window_size = window_size
         self.target_col_indices = target_col_indices
         self.start_index = start_index
         self.end_index = end_index
+        self.horizon = horizon
 
     def __len__(self):
-        return self.end_index - self.start_index - self.window_size
+        return self.end_index - self.start_index - self.window_size - self.horizon + 1
 
     def __getitem__(self, index):
         real_index = self.start_index + index
@@ -28,9 +37,13 @@ class TrafficSlidingWindowDataset(Dataset):
             real_index : real_index + self.window_size
         ]
 
-        # y: pencerenin hemen sonrasındaki zaman adımı
+        # y: pencerenin horizon kadar sonrasındaki zaman adımı
+        # horizon=1 ise hemen sonraki adımı tahmin eder.
+        # horizon=3 ise 3 adım sonrasını tahmin eder.
+        target_index = real_index + self.window_size + self.horizon - 1
+
         y_target = self.data_x[
-            real_index + self.window_size,
+            target_index,
             :,
             self.target_col_indices
         ]

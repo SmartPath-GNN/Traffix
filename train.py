@@ -30,13 +30,15 @@ def main():
 
     print("\n2. Lazy Sliding Window Dataset hazırlanıyor...")
 
-    WINDOW_SIZE = 6
+    WINDOW_SIZE = 12
+    HORIZON = 6
 
     total_time = x_raw.shape[0]
     sample_count = total_time - WINDOW_SIZE
 
     print(f"   -> Toplam zaman adımı: {total_time}")
     print(f"   -> Window size: {WINDOW_SIZE}")
+    print(f"   -> Tahmin ufku / Horizon: {HORIZON}")
     print(f"   -> Toplam örnek sayısı: {sample_count}")
 
     print("\n3. Veri seti kronolojik olarak bölünüyor...")
@@ -50,7 +52,8 @@ def main():
         window_size=WINDOW_SIZE,
         target_col_indices=target_indices,
         start_index=0,
-        end_index=train_end
+        end_index=train_end,
+        horizon=HORIZON
     )
 
     val_dataset = TrafficSlidingWindowDataset(
@@ -58,7 +61,8 @@ def main():
         window_size=WINDOW_SIZE,
         target_col_indices=target_indices,
         start_index=train_end,
-        end_index=val_end
+        end_index=val_end,
+        horizon=HORIZON
     )
 
     test_dataset = TrafficSlidingWindowDataset(
@@ -66,7 +70,8 @@ def main():
         window_size=WINDOW_SIZE,
         target_col_indices=target_indices,
         start_index=val_end,
-        end_index=sample_count
+        end_index=sample_count,
+        horizon=HORIZON
     )
 
     print(f"   -> Eğitim örnek sayısı: {len(train_dataset)}")
@@ -97,8 +102,8 @@ def main():
 
     model = GNNLSTM(
         input_features=x_raw.shape[-1],
-        gnn_hidden=32,
-        lstm_hidden=64,
+        gnn_hidden=16,
+        lstm_hidden=32,
         output_features=len(target_indices)
     ).to(device)
 
@@ -108,12 +113,12 @@ def main():
 
     optimizer = torch.optim.Adam(
         model.parameters(),
-        lr=0.001
+        lr=0.0005
     )
 
     early_stopping = EarlyStopping(
         patience=10,
-        delta=0.0001,
+        delta=1e-6,
         path="best_gnn_lstm_model.pt"
     )
 
