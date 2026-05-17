@@ -33,16 +33,21 @@ class GNNLSTM(nn.Module):
     Linear katman bir sonraki zaman adımı için tahmin üretir.
     """
 
-    def __init__(self, input_features, gnn_hidden, lstm_hidden, output_features):
+    def __init__(self, input_features, gnn_hidden, lstm_hidden, output_features,dropout=0.2):
         super(GNNLSTM, self).__init__()
 
         self.gnn = GCNConv(input_features, gnn_hidden)
+
+         # GNN çıktısından sonra dropout
+        self.gnn_dropout = nn.Dropout(p=dropout)
 
         self.lstm = nn.LSTM(
             input_size=gnn_hidden,
             hidden_size=lstm_hidden,
             batch_first=True
         )
+         # LSTM çıktısından sonra dropout
+        self.lstm_dropout = nn.Dropout(p=dropout)
 
         self.linear = nn.Linear(lstm_hidden, output_features)
 
@@ -72,6 +77,9 @@ class GNNLSTM(nn.Module):
 
             h_t = torch.relu(h_t)
 
+             # GNN dropout
+            h_t = self.gnn_dropout(h_t)
+
             h_t = h_t.reshape(batch_size, node_count, -1)
 
             gnn_outputs.append(h_t)
@@ -84,6 +92,9 @@ class GNNLSTM(nn.Module):
         lstm_out, _ = self.lstm(gnn_out)
 
         last_hidden = lstm_out[:, -1, :]
+
+        # LSTM dropout
+        last_hidden = self.lstm_dropout(last_hidden)
 
         prediction = self.linear(last_hidden)
 
