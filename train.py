@@ -74,8 +74,8 @@ def main():
     print("\n4. Model başlatılıyor...")
     model = GNNLSTM(
         input_features=x_raw.shape[-1],
-        gnn_hidden=64,
-        lstm_hidden=128,
+        gnn_hidden=32,
+        lstm_hidden=64,
         output_features=len(target_indices)
     ).to(device)
     print(model)
@@ -91,7 +91,7 @@ def main():
         factor=0.5,
         patience=3,
         min_lr=1e-6,
-        verbose=True
+        #verbose=True
     )
 
     early_stopping = EarlyStopping(
