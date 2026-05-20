@@ -1,5 +1,9 @@
 import torch
-from metrics import calculate_mae, calculate_rmse,calculate_r2
+from metrics import (
+    calculate_masked_mae,
+    calculate_masked_rmse,
+    calculate_masked_r2
+)
 
 
 def train_one_epoch(model, dataloader, edge_index, edge_weight, optimizer, loss_fn, device):
@@ -53,8 +57,8 @@ def evaluate(model, dataloader, edge_index, edge_weight, loss_fn, device):
     all_predictions = torch.cat(all_predictions, dim=0)
     all_targets = torch.cat(all_targets, dim=0)
 
-    mae = calculate_mae(all_targets, all_predictions)
-    rmse = calculate_rmse(all_targets, all_predictions)
-    r2 = calculate_r2(all_targets, all_predictions)
+    mae = calculate_masked_mae(all_targets, all_predictions)
+    rmse = calculate_masked_rmse(all_targets, all_predictions)
+    r2 = calculate_masked_r2(all_targets, all_predictions)
 
-    return total_loss / len(dataloader), mae, rmse,r2
+    return total_loss / len(dataloader), mae, rmse, r2

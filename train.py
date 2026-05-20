@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader
 from dataset import TrafficSlidingWindowDataset
 from model import GNNLSTM
 from engine import train_one_epoch, evaluate
-from metrics import evaluate_naive_baseline
+from metrics import evaluate_naive_baseline, masked_mse_loss
 from utils import get_device, EarlyStopping
 
 
@@ -66,7 +66,7 @@ def main():
     print(f"   -> Doğrulama örnek sayısı: {len(val_dataset)}")
     print(f"   -> Test örnek sayısı: {len(test_dataset)}")
 
-    BATCH_SIZE = 16
+    BATCH_SIZE = 4
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
@@ -74,13 +74,13 @@ def main():
     print("\n4. Model başlatılıyor...")
     model = GNNLSTM(
         input_features=x_raw.shape[-1],
-        gnn_hidden=32,
-        lstm_hidden=64,
+        gnn_hidden=16,
+        lstm_hidden=32,
         output_features=len(target_indices)
     ).to(device)
     print(model)
 
-    loss_fn = nn.MSELoss()
+    loss_fn = masked_mse_loss
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
 
@@ -101,7 +101,7 @@ def main():
     )
 
     print("\n5. Egitim basliyor...")
-    EPOCHS = 10
+    EPOCHS = 50
 
     for epoch in range(1, EPOCHS + 1):
         print(f"\nEpoch {epoch:03d} basladi...")
