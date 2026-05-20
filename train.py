@@ -13,7 +13,7 @@ def main():
     print(f"-> Kullanılan cihaz: {device}")
 
     print("\n1. Veriler yükleniyor...")
-    dataset_dict = torch.load("gnn_lstm_dataset.pt", map_location="cpu")
+    dataset_dict = torch.load("gnn_lstm_dataset_6ay.pt", map_location="cpu")
     x_raw = dataset_dict["x"].float()
     edge_index = dataset_dict["edge_index"].long().to(device)
     edge_weight = dataset_dict["edge_weight"].float().to(device)
@@ -25,7 +25,7 @@ def main():
 
     print("\n2. Lazy Sliding Window Dataset hazırlanıyor...")
     WINDOW_SIZE = 12
-    HORIZON = 6
+    HORIZON = 12
     total_time = x_raw.shape[0]
     sample_count = total_time - WINDOW_SIZE
     print(f"   -> Toplam zaman adımı: {total_time}")

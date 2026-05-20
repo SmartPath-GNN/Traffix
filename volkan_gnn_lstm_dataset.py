@@ -43,7 +43,17 @@ def veri_setini_hazirla():
 
     print("5. Graf Topolojisi PyTorch Tensörlerine Çevriliyor...")
     edge_index_tensor = torch.tensor([kaynak_dugumler, hedef_dugumler], dtype=torch.long)
-    edge_weight_tensor = torch.tensor(kenar_agirliklari, dtype=torch.float32)
+    edge_weight_array = np.array(kenar_agirliklari, dtype=np.float32)
+
+    edge_weight_array = 1.0 / (edge_weight_array + 1e-8)
+
+    edge_weight_array = (
+    edge_weight_array - edge_weight_array.min()
+    ) / (
+    edge_weight_array.max() - edge_weight_array.min() + 1e-8
+    )
+
+    edge_weight_tensor = torch.tensor(edge_weight_array, dtype=torch.float32)
 
     print("6. Özellik (X) Matrisi CSV'den yükleniyor...")
     df = pd.read_csv('model_girdisi_son.csv')
@@ -59,6 +69,8 @@ def veri_setini_hazirla():
     
     # Aynı saat içindeki aynı kavşağa ait verilerin ortalamasını alarak tek bir satıra indirgiyoruz
     df = df.groupby(['DATE_TIME', 'gnn_node_id']).mean().reset_index()
+    df['HOUR'] = df['DATE_TIME'].dt.hour
+    df['DAY_OF_WEEK'] = df['DATE_TIME'].dt.dayofweek
     
     feature_cols = ['HOUR', 'DAY_OF_WEEK', 'NORM_SPEED', 'NORM_VEHICLES']
     num_features = len(feature_cols)

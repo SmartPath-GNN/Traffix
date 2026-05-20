@@ -33,7 +33,7 @@ class GNNLSTM(nn.Module):
     Linear katman bir sonraki zaman adımı için tahmin üretir.
     """
 
-    def __init__(self, input_features, gnn_hidden, lstm_hidden, output_features,dropout=0.2):
+    def __init__(self, input_features, gnn_hidden, lstm_hidden, output_features,dropout=0.1):
         super(GNNLSTM, self).__init__()
 
         self.gnn = GCNConv(input_features, gnn_hidden)
