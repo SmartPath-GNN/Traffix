@@ -1,6 +1,7 @@
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 import time
+import joblib
 
 input_file = 'gnn_hazir_veri.csv'
 output_file = 'model_girdisi_son.csv'
@@ -27,6 +28,10 @@ def oznitelik_muhendisligi():
     # Sadece sayısal değerleri sıkıştırıyoruz
     sutunlar_normalize = ['AVERAGE_SPEED', 'NUMBER_OF_VEHICLES']
     df[['NORM_SPEED', 'NORM_VEHICLES']] = scaler.fit_transform(df[sutunlar_normalize])
+
+    # BÜTÜN DÜĞÜM BURASI: Scaler'ı kaydediyoruz ki analiz aşamasında kullanabilelim!
+    joblib.dump(scaler, 'traffic_scaler.pkl')
+    print("   -> Scaler 'traffic_scaler.pkl' olarak kaydedildi.")
     
     print("4. Veri kronolojik olarak sıralanıyor ve geçici veriler temizleniyor...")
     
