@@ -10,10 +10,8 @@ def tersine_eslestirme_yap(model_cikti_tensor, scaler, gecerli_dugum_maskesi):
     ilceler = ['Beşiktaş, Istanbul, Turkey', 'Şişli, Istanbul, Turkey', 'Kağıthane, Istanbul, Turkey']
     G = ox.graph_from_place(ilceler, network_type='drive')
     
-    # Graf verisini doğrudan GeoPandas DataFrame'lerine çeviriyoruz
     gdf_nodes, gdf_edges = ox.graph_to_gdfs(G)
-    print("   -> GeoPandas ile yolların (LineString) geometrileri çıkarıldı.")
-
+    
     print("2. ID'leri Geri Çevirme (Reverse Mapping) sözlüğü oluşturuluyor...")
     unique_nodes = list(G.nodes())
     gnn_to_node_id = {i: osmid for i, osmid in enumerate(unique_nodes)}
@@ -22,7 +20,7 @@ def tersine_eslestirme_yap(model_cikti_tensor, scaler, gecerli_dugum_maskesi):
     tahmin_dizisi = model_cikti_tensor.cpu().detach().numpy()
     gercek_hiz_degerleri = scaler.inverse_transform(tahmin_dizisi)[:, 0] 
 
-    # 🌟 KRİTİK MÜDAHALE: Verisi hiç olmayan (maske=False) sokakların tahminini NaN (Boş) yapıyoruz.
+    # Sadece doğrudan veri noktası olan yerleri al, diğerlerini NaN yap
     gercek_hiz_degerleri[~gecerli_dugum_maskesi] = np.nan
 
     df_tahminler = pd.DataFrame({
@@ -32,11 +30,22 @@ def tersine_eslestirme_yap(model_cikti_tensor, scaler, gecerli_dugum_maskesi):
     
     df_tahminler['osmnx_node_id'] = df_tahminler['gnn_node_id'].map(gnn_to_node_id)
 
-    print("4. Geometri Ekleme Başlıyor...")
+    print("4. Geometri Ekleme ve Sokak Bazlı Tamamlama (Interpolation)...")
     gdf_edges = gdf_edges.reset_index()
     gdf_sonuc = gdf_edges.merge(df_tahminler, left_on='u', right_on='osmnx_node_id', how='left')
     
     gdf_sonuc = gdf_sonuc[['u', 'v', 'name', 'length', 'geometry', 'tahmini_hiz_kmh']]
+    
+    # 🌟 YENİ VE KRİTİK ADIM: Sokak Bazlı Veri Yayılımı
+    # Önce list formatında gelebilen sokak isimlerini temiz bir string'e çeviriyoruz
+    gdf_sonuc['name_clean'] = gdf_sonuc['name'].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
+    
+    # İsimsiz ('nan' veya 'None') olan küçük ara yolları gruplamamak için ayıklıyoruz
+    gecerli_isimler = gdf_sonuc['name_clean'].replace({'nan': np.nan, 'None': np.nan})
+    
+    # Eğer sokağın bir kısmında veri varsa, sokağın genel ortalamasıyla boş (NaN) kısımları doldur.
+    # Eğer sokakta hiç veri yoksa, NaN (Gri) olarak kalmaya devam edecek.
+    gdf_sonuc['tahmini_hiz_kmh'] = gdf_sonuc.groupby(gecerli_isimler)['tahmini_hiz_kmh'].transform(lambda x: x.fillna(x.mean()))
     
     print("✅ Tersine eşleştirme tamamlandı!")
     return gdf_sonuc

@@ -1,4 +1,5 @@
 import torch
+import gc
 from metrics import (
     calculate_masked_mae,
     calculate_masked_rmse,
@@ -28,14 +29,22 @@ def train_one_epoch(model, dataloader, edge_index, edge_weight, optimizer, loss_
 
         if batch_no % 20 == 0:
             print(f"      Batch {batch_no} | Loss: {loss.item():.6f}")
+            
+        # 🌟 RAM VE VRAM TEMİZLİĞİ: Geriye kalan devasa tensörleri hemen yok et
+        del x_rec, x_day, x_wek, y_batch, predictions, loss
+        if batch_no % 100 == 0:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
 
     return total_loss / len(dataloader)
 
 def evaluate(model, dataloader, edge_index, edge_weight, loss_fn, device):
     model.eval()
     total_loss = 0
-    all_predictions = []
-    all_targets = []
+    total_mae = 0
+    total_rmse = 0
+    total_r2 = 0
 
     with torch.no_grad():
         for x_rec, x_day, x_wek, y_batch in dataloader:
@@ -48,14 +57,14 @@ def evaluate(model, dataloader, edge_index, edge_weight, loss_fn, device):
             loss = loss_fn(predictions, y_batch)
 
             total_loss += loss.item()
-            all_predictions.append(predictions.cpu())
-            all_targets.append(y_batch.cpu())
+            
+            # 🌟 OOM ÇÖZÜMÜ: Tüm tahminleri bellekte biriktirmek yerine batch bazlı hesaplıyoruz
+            total_mae += calculate_masked_mae(y_batch, predictions)
+            total_rmse += calculate_masked_rmse(y_batch, predictions)
+            total_r2 += calculate_masked_r2(y_batch, predictions)
+            
+            # Belleği anında boşaltıyoruz
+            del x_rec, x_day, x_wek, y_batch, predictions, loss
 
-    all_predictions = torch.cat(all_predictions, dim=0)
-    all_targets = torch.cat(all_targets, dim=0)
-
-    mae = calculate_masked_mae(all_targets, all_predictions)
-    rmse = calculate_masked_rmse(all_targets, all_predictions)
-    r2 = calculate_masked_r2(all_targets, all_predictions)
-
-    return total_loss / len(dataloader), mae, rmse, r2
+    num_batches = len(dataloader)
+    return total_loss / num_batches, total_mae / num_batches, total_rmse / num_batches, total_r2 / num_batches

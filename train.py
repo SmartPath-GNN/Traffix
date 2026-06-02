@@ -11,7 +11,7 @@ def main():
     print(f"-> Kullanılan cihaz: {device}")
 
     print("\n1. Veriler yükleniyor...")
-    dataset_dict = torch.load("gnn_lstm_dataset_6ay.pt", map_location="cpu")
+    dataset_dict = torch.load("gnn_lstm_dataset_tam_veri.pt", map_location="cpu")
     x_raw = dataset_dict["x"].float()
     edge_index = dataset_dict["edge_index"].long().to(device)
     edge_weight = dataset_dict["edge_weight"].float().to(device)

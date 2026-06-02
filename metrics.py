@@ -1,5 +1,6 @@
 import torch
 import math
+import gc
 
 def masked_mse_loss(y_pred, y_true, mask_value=0.0):
     """Sadece gerçek veri barındıran hücrelerde kayıp hesaplayan maskeli MSE."""
@@ -31,8 +32,9 @@ def calculate_masked_r2(y_true, y_pred, mask_value=0.0):
 
 def evaluate_naive_baseline(dataloader, target_col_indices, horizon=6):
     """Son zaman adımındaki bilinen gerçek verileri gelecek ufka kopyalayarak test eder."""
-    all_predictions = []
-    all_targets = []
+    total_mae = 0
+    total_rmse = 0
+    total_r2 = 0
 
     with torch.no_grad():
         for x_rec, _, _, y_batch in dataloader:
@@ -43,14 +45,12 @@ def evaluate_naive_baseline(dataloader, target_col_indices, horizon=6):
             # Boyutu [Batch, Horizon, Düğüm, Özellik] formuna broadcast etmek
             baseline_pred = baseline_pred_single.unsqueeze(1).repeat(1, horizon, 1, 1)
 
-            all_predictions.append(baseline_pred.cpu())
-            all_targets.append(y_batch.cpu())
-
-    all_predictions = torch.cat(all_predictions, dim=0)
-    all_targets = torch.cat(all_targets, dim=0)
-
-    baseline_mae = calculate_masked_mae(all_targets, all_predictions)
-    baseline_rmse = calculate_masked_rmse(all_targets, all_predictions)
-    baseline_r2 = calculate_masked_r2(all_targets, all_predictions)
-
-    return baseline_mae, baseline_rmse, baseline_r2
+            # 🌟 OOM ÇÖZÜMÜ: Listeye eklemek yerine batch ortalamalarını topluyoruz
+            total_mae += calculate_masked_mae(y_batch, baseline_pred)
+            total_rmse += calculate_masked_rmse(y_batch, baseline_pred)
+            total_r2 += calculate_masked_r2(y_batch, baseline_pred)
+            
+            del x_rec, y_batch, baseline_pred
+            
+    num_batches = len(dataloader)
+    return total_mae / num_batches, total_rmse / num_batches, total_r2 / num_batches
