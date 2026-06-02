@@ -2,156 +2,172 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import pydeck as pdk
-import plotly.express as px
 import torch
 import joblib
-from model import GNNLSTM
+from model import MultiStreamGNNLSTM
 from utils import get_device
 from analiz_ve_harita import tersine_eslestirme_yap, kronik_darbogazlari_bul
 
 # 1. Sayfa Ayarları
 st.set_page_config(page_title="Traffix Akıllı Trafik Yönetimi", layout="wide")
-st.title("🚦 Traffix: GNN-LSTM Tabanlı Trafik Tahmin Paneli")
+st.title("🚦 Traffix: Çok Bileşenli ve Dizi Tabanlı Trafik Yönetim Paneli")
 
-# 2. Modeli ve Verileri Önbelleğe Alma (Uygulamanın yavaşlamaması için ÇOK ÖNEMLİ)
+# 2. Statik Model ve Ham Verileri Önbelleğe Alma
 @st.cache_resource
-def load_model_and_data():
-    # 1. Cihazı ve Veriyi Yükle
+def load_static_model_and_data():
     device = get_device()
     dataset_dict = torch.load("gnn_lstm_dataset_6ay.pt", map_location="cpu")
     x_raw = dataset_dict["x"].float().to(device)
     edge_index = dataset_dict["edge_index"].long().to(device)
     edge_weight = dataset_dict["edge_weight"].float().to(device)
-    
     scaler = joblib.load('traffic_scaler.pkl')
 
-    # 2. Modeli Ayağa Kaldır
-    model = GNNLSTM(
-        input_features=x_raw.shape[-1],
-        gnn_hidden=16,
-        lstm_hidden=32,
-        output_features=2 
+    HORIZON = 6
+    # Eğitilen 16 ve 32 katman boyutlarına sahip model yapısı
+    model = MultiStreamGNNLSTM(
+        input_features=x_raw.shape[-1], gnn_hidden=16, lstm_hidden=32, output_features=2, horizon=HORIZON
     ).to(device)
     model.load_state_dict(torch.load("best_gnn_lstm_model.pt", map_location=device))
     model.eval()
 
-    # 3. OTO-REGRESİF ZAMAN DÖNGÜSÜ (1'den 6 Saate Kadar)
-    window_size = 12
-    mevcut_pencere = x_raw[-window_size:, :, :].unsqueeze(0).clone() 
+    t = x_raw.shape[0]
+    window_size = 3
 
-    tahminler_sozlugu = {} # 6 farklı saatin haritasını burada tutacağız
+    x_recent = x_raw[t - window_size : t].unsqueeze(0)
+    x_daily  = x_raw[t - 24 - (window_size // 2) : t - 24 + (window_size // 2) + (window_size % 2)].unsqueeze(0)
+    x_weekly = x_raw[t - 168 - (window_size // 2) : t - 168 + (window_size // 2) + (window_size % 2)].unsqueeze(0)
 
+    # 🌟 DİNAMİK MASKE: Zaman ve özellik boyutlarında toplayarak hiç verisi olmayan düğümleri tespit etme
+    gecerli_dugum_maskesi = (x_raw.abs().sum(dim=(0, 2)) > 1e-6).cpu().numpy()
+
+    return model, x_recent, x_daily, x_weekly, edge_index, edge_weight, scaler, HORIZON, gecerli_dugum_maskesi
+
+model, x_recent, x_daily, x_weekly, edge_index, edge_weight, scaler, HORIZON, gecerli_dugum_maskesi = load_static_model_and_data()
+
+# 🌟 HIZ OPTİMİZASYONU: Cache mimarisi
+@st.cache_resource
+def get_cached_predictions(use_recent, use_daily, use_weekly, _model, _x_recent, _x_daily, _x_weekly, _edge_index, _edge_weight, _scaler, horizon, _maske):
+    x_r = _x_recent if use_recent else torch.zeros_like(_x_recent)
+    x_d = _x_daily if use_daily else torch.zeros_like(_x_daily)
+    x_w = _x_weekly if use_weekly else torch.zeros_like(_x_weekly)
+    
     with torch.no_grad():
-        for saat_ileri in range(1, 7): # 1, 2, 3, 4, 5, 6
-            # A) Tahmin Üret
-            gelecek_tahmini = model(mevcut_pencere, edge_index, edge_weight)
-            tahmin_tensoru = gelecek_tahmini[0] 
-
-            # B) Bu saat için harita verilerini üret
-            harita_gdf = tersine_eslestirme_yap(tahmin_tensoru, scaler)
-            darbogazlar_gdf = kronik_darbogazlari_bul(harita_gdf, kume_sayisi=3)
-            
-            # C) Sözlüğe kaydet (Örn: tahminler_sozlugu[3] = 3. saatin haritası)
-            tahminler_sozlugu[saat_ileri] = {
-                'harita': harita_gdf,
-                'darbogazlar': darbogazlar_gdf
-            }
-            
-            # D) --- PENCEREYİ BİR SAAT İLERİ KAYDIR ---
-            # Mevcut saati ve günü alıp 1 saat ekliyoruz
-            son_saat = mevcut_pencere[0, -1, 0, 0].item()
-            son_gun = mevcut_pencere[0, -1, 0, 1].item()
-            
-            yeni_saat = (son_saat + 1) % 24
-            yeni_gun = son_gun if yeni_saat != 0 else (son_gun + 1) % 7
-            
-            # Modelin beklediği yeni özellik matrisini oluşturuyoruz
-            yeni_adim = torch.zeros((1, 1, mevcut_pencere.shape[2], 4), device=device)
-            yeni_adim[0, 0, :, 0] = yeni_saat
-            yeni_adim[0, 0, :, 1] = yeni_gun
-            yeni_adim[0, 0, :, 2:] = gelecek_tahmini # Kendi ürettiği tahmini GİRDİ olarak veriyor!
-            
-            # Eski pencerenin en başındaki saati silip, yeni saati en sona ekliyoruz
-            mevcut_pencere = torch.cat((mevcut_pencere[:, 1:, :, :], yeni_adim), dim=1)
-            
+        tum_ufuk_tahmini = _model(x_r, x_d, x_w, _edge_index, _edge_weight)
+        
+    tahminler_sozlugu = {}
+    for saat_ileri in range(1, horizon + 1):
+        tahmin_tensoru = tum_ufuk_tahmini[0, saat_ileri - 1, :, :]
+        # Maskeyi eşleştirme fonksiyonuna gönderiyoruz
+        harita_gdf = tersine_eslestirme_yap(tahmin_tensoru, _scaler, _maske)
+        darbogazlar_gdf = kronik_darbogazlari_bul(harita_gdf, kume_sayisi=3)
+        
+        tahminler_sozlugu[saat_ileri] = {
+            'harita': harita_gdf, 'darbogazlar': darbogazlar_gdf
+        }
     return tahminler_sozlugu
 
-# SADECE 1 KERE ÇALIŞIP 6 SAATİ DE ÖNBELLEĞE ALIYOR
-tahminler_sozlugu = load_model_and_data()
-
-# 3. Sol Menü (Kullanıcı Kontrolleri)
-st.sidebar.header("Kontrol Paneli")
+# 3. Kullanıcı Kontrolleri (Sol Panel)
+st.sidebar.header("🕹️ Kontrol Paneli")
 secilen_zaman = st.sidebar.slider("Tahmin Ufku (Saat)", min_value=1, max_value=6, value=1)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Zamansal Bağlam Kolları")
+st.sidebar.caption("Yapay zekanın hangi pencereleri hesaba katacağını seçin:")
+use_recent = st.sidebar.checkbox("Kısa Dönem (Son 3 Saat şoku)", value=True)
+use_daily = st.sidebar.checkbox("Günlük Döngü (Dün Aynı Saat)", value=True)
+use_weekly = st.sidebar.checkbox("Haftalık Döngü (Geçen Hafta)", value=True)
+
 gosterim_modu = st.sidebar.radio("Harita Modu", ["Isı Haritası (Genel Trafik)", "Sadece Darboğazlar (Uyarı)"])
 
-# 🌟 DÜZELTME: Sürgüden gelen zamana göre İLGİLİ SAATİN verisini sözlükten çekiyoruz!
-# (.copy() kullanmak çok önemlidir, aksi takdirde Streamlit hata verir)
-harita_gdf = tahminler_sozlugu[secilen_zaman]['harita'].copy()
-darbogazlar_gdf = tahminler_sozlugu[secilen_zaman]['darbogazlar'].copy()
+tahminler_sozlugu = get_cached_predictions(
+    use_recent, use_daily, use_weekly, model, x_recent, x_daily, x_weekly, edge_index, edge_weight, scaler, HORIZON, gecerli_dugum_maskesi
+)
 
+harita_gdf = tahminler_sozlugu[secilen_zaman]['harita']
+darbogazlar_gdf = tahminler_sozlugu[secilen_zaman]['darbogazlar']
 
-# 4. Arayüz Bölünmesi (Harita ve Grafikler yan yana)
+# 4. Görselleştirme Arayüzü
 col1, col2 = st.columns([2, 1])
 
 def hiz_rengi_belirle(hiz):
-    if pd.isna(hiz):
-        return [128, 128, 128, 100]  # Gri: Veri yok veya hesaplanamadı
-    elif hiz < 25.0:
-        return [227, 26, 28, 255]    # Koyu Kırmızı: Trafik Kilit (0-25 km/s)
-    elif hiz < 40.0:
-        return [253, 141, 60, 255]   # Turuncu: Yoğun (25-40 km/s)
-    elif hiz < 55.0:
-        return [254, 204, 92, 255]   # Sarı: Akıcı ama kalabalık (40-55 km/s)
-    else:
-        return [35, 139, 69, 255]    # Koyu Yeşil: Tamamen Akıcı (55+ km/s)
+    if pd.isna(hiz) or hiz < 5.0: return [128, 128, 128, 50]   # Verisiz yollar: Silik Gri
+    elif hiz < 25.0: return [227, 26, 28, 255]                 # Koyu Kırmızı
+    elif hiz < 40.0: return [253, 141, 60, 255]                # Turuncu
+    elif hiz < 55.0: return [254, 204, 92, 255]                # Sarı
+    else: return [35, 139, 69, 255]                            # Koyu Yeşil
+
+def darbogaz_rengi_kalinligi_belirle(satir):
+    if satir['trafik_durumu_kumesi'] == 0:
+        return [255, 0, 0, 255], 18                            # Kırmızı ve Kalın
+    return [128, 128, 128, 50], 4                              # Diğer Yollar: Silik Gri ve İnce
 
 with col1:
     st.subheader(f"🗺️ İstanbul Tıkanıklık Yayılımı (+{secilen_zaman} Saat)")
     
     harita_gdf['hiz_gosterim'] = harita_gdf['tahmini_hiz_kmh'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "Veri Yok")
-    
-    # 1. RENKLERİ UYGULA
     harita_gdf['cizgi_rengi'] = harita_gdf['tahmini_hiz_kmh'].apply(hiz_rengi_belirle)
 
-    # 2. DARBOĞAZLARI İZOLE ET (Sadece 0 numaralı kümeyi alıyoruz)
-    gercek_darbogazlar_gdf = darbogazlar_gdf[darbogazlar_gdf['trafik_durumu_kumesi'] == 0].copy()
-    gercek_darbogazlar_gdf['hiz_gosterim'] = gercek_darbogazlar_gdf['tahmini_hiz_kmh'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "Veri Yok")
-
-    # 3. HARİTA KATMANLARI
-    layer_traffic = pdk.Layer(
-        "GeoJsonLayer",
-        data=harita_gdf,
-        get_line_color="cizgi_rengi",
-        get_line_width=10,            
-        pickable=True                 
-    )
-    
-    # DÜZELTME: Scatterplot (nokta) yerine GeoJsonLayer (Çizgi) kullanıyoruz
-    layer_bottleneck = pdk.Layer(
-        "GeoJsonLayer",
-        data=gercek_darbogazlar_gdf,
-        get_line_color=[255, 0, 0, 255], # Parlak, opak kırmızı
-        get_line_width=10,               # Trafik çizgisinden daha kalın (vurgulu)
-        pickable=True
-    )
-
-    # 4. GÖSTERİM MANTIĞI
-    if gosterim_modu == "Sadece Darboğazlar (Uyarı)":
-        layers = [layer_bottleneck] # Sadece darboğazları kalın kırmızı göster
+    if gosterim_modu == "Isı Haritası (Genel Trafik)":
+        layer = pdk.Layer(
+            "GeoJsonLayer", 
+            data=harita_gdf, 
+            get_line_color="cizgi_rengi", 
+            get_line_width=10, 
+            pickable=True
+        )
     else:
-        layers = [layer_traffic] # DÜZELTME: Isı haritasında darboğazları üstüne ekleme, sadece normal trafiği göster!
-    
-    # 5. HARİTAYI ÇİZ
+        # Darboğaz modunda tüm yolları veriyoruz ama renk/kalınlık dinamik atanıyor
+        darbogazlar_gdf[['cizgi_rengi', 'cizgi_kalinligi']] = darbogazlar_gdf.apply(darbogaz_rengi_kalinligi_belirle, axis=1, result_type='expand')
+        darbogazlar_gdf['hiz_gosterim'] = darbogazlar_gdf['tahmini_hiz_kmh'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "Veri Yok")
+        
+        layer = pdk.Layer(
+            "GeoJsonLayer", 
+            data=darbogazlar_gdf, 
+            get_line_color="cizgi_rengi", 
+            get_line_width="cizgi_kalinligi", 
+            pickable=True
+        )
+
     st.pydeck_chart(pdk.Deck(
         map_style="carto-dark",
         initial_view_state=pdk.ViewState(latitude=41.06, longitude=29.0, zoom=12),
-        layers=layers,
-        # DÜZELTME: Tooltip artık orijinal sayıyı değil, formatlanmış metin sütununu okuyor
-        tooltip={"text": "Sokak: {name}\nHız: {hiz_gosterim} km/s"} 
+        layers=[layer],
+        tooltip={"text": "Sokak: {name}\nHız: {hiz_gosterim} km/s"}
     ))
+
 with col2:
-    st.subheader("📈 Seçili Yol Segmenti İzleme")
-    # Kullanıcının haritadan seçtiği veya listeden seçtiği bir sokağın zaman serisi
-    secilen_sokak = st.selectbox("Sokak Seçin", ["Büyükdere Cd.", "Barbaros Blv.", "Piyale Paşa Blv."])
+    st.subheader("📈 Gelişmiş Şehir Analitiği")
     
-    st.info("💡 Sistem, denetimsiz K-Means algoritması ile bu güzergahta darboğaz riski tespit etmiştir.")
+    gecerli_sokaklar = harita_gdf[harita_gdf['name'].notna()]
+    sokak_isimleri = gecerli_sokaklar['name'].apply(lambda x: ", ".join(x) if isinstance(x, list) else x)
+    sokak_listesi = sokak_isimleri.unique()
+    
+    varsayilan_index = list(sokak_listesi).index("Büyükdere Caddesi") if "Büyükdere Caddesi" in sokak_listesi else 0
+    
+    secilen_sokak = st.selectbox("İzlemek İstediğiniz Güzergahı Seçin:", options=sokak_listesi, index=varsayilan_index)
+    
+    harita_isim_temiz = harita_gdf.copy()
+    harita_isim_temiz['name'] = harita_isim_temiz['name'].apply(lambda x: ", ".join(x) if isinstance(x, list) else x)
+    
+    sokak_verisi = harita_isim_temiz[harita_isim_temiz['name'] == secilen_sokak]
+    ortalama_hiz = sokak_verisi['tahmini_hiz_kmh'].mean()
+    hiz_metni = f"{ortalama_hiz:.1f} km/s" if pd.notna(ortalama_hiz) else "Veri Yok"
+    
+    darbogaz_mi = (sokak_verisi['trafik_durumu_kumesi'] == 0).any() if 'trafik_durumu_kumesi' in sokak_verisi.columns else False
+
+    # Metrik Kartı Gösterimi
+    st.metric(
+        label=f"{secilen_zaman} Saat Sonra {secilen_sokak} Durumu", 
+        value=hiz_metni, 
+        delta="-Yoğun Darboğaz" if darbogaz_mi else ("Akıcı Akış" if pd.notna(ortalama_hiz) else "Veri Yok")
+    )
+    
+    if darbogaz_mi:
+        st.error(f"🚨 KRİTİK UYARI: Sistem, {secilen_zaman} saat sonra **{secilen_sokak}** üzerinde K-Means Kilit kümesi saptamıştır. Trafik durma noktasına gelebilir.")
+    elif pd.isna(ortalama_hiz):
+        st.warning(f"⚠️ **{secilen_sokak}** güzergahı için veri setinde yeterli sensör bilgisi bulunmamaktadır.")
+    else:
+        st.success(f"✅ **{secilen_sokak}** güzergahının {secilen_zaman} saat sonra tamamen temiz ve akıcı olması öngörülmektedir.")
+
+    st.markdown("---")
+    st.info("💡 **Ablasyon Analizi Notu:** Sol panelden Daily veya Weekly bağlam onay kutularını kaldırarak modelin tahminlerinin nasıl değiştiğini ve döngüleri kaybetmenin simülasyonu nasıl bozduğunu canlı izleyebilirsiniz.")

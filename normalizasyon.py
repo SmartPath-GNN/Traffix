@@ -22,8 +22,8 @@ def oznitelik_muhendisligi():
     df['HOUR'] = df['DATE_TIME'].dt.hour
     df['DAY_OF_WEEK'] = df['DATE_TIME'].dt.dayofweek
 
-    print("3. Min-Max Normalizasyonu Yapılıyor (0-1 arasına sıkıştırma)...")
-    scaler = MinMaxScaler()
+    print("3. Min-Max Normalizasyonu Yapılıyor (0.1-1.0 arasına sıkıştırma)...")
+    scaler = MinMaxScaler(feature_range=(0.1, 1.0))
     
     # Sadece sayısal değerleri sıkıştırıyoruz
     sutunlar_normalize = ['AVERAGE_SPEED', 'NUMBER_OF_VEHICLES']
