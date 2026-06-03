@@ -9,8 +9,8 @@ from utils import get_device
 from analiz_ve_harita import tersine_eslestirme_yap, kronik_darbogazlari_bul
 
 # 1. Sayfa Ayarları
-st.set_page_config(page_title="Traffix Akıllı Trafik Yönetimi", layout="wide")
-st.title("🚦 Traffix: Çok Bileşenli ve Dizi Tabanlı Trafik Yönetim Paneli")
+st.set_page_config(page_title="Traffix Akıllı Trafik İzleme Paneli", layout="wide")
+st.title("🚦 Traffix: Trafik İzleme Paneli")
 
 # 2. Statik Model ve Ham Verileri Önbelleğe Alma
 @st.cache_resource
@@ -153,21 +153,57 @@ with col2:
     ortalama_hiz = sokak_verisi['tahmini_hiz_kmh'].mean()
     hiz_metni = f"{ortalama_hiz:.1f} km/s" if pd.notna(ortalama_hiz) else "Veri Yok"
     
-    darbogaz_mi = (sokak_verisi['trafik_durumu_kumesi'] == 0).any() if 'trafik_durumu_kumesi' in sokak_verisi.columns else False
+    kume_darbogaz_mi = (sokak_verisi['trafik_durumu_kumesi'] == 0).any() if 'trafik_durumu_kumesi' in sokak_verisi.columns else False
+    
+    # 🌟 YENİ: Renk (Hız) Kategorilerine Göre Detaylı Durum Belirleme
+    durum_kategorisi = ""
+    
+    if pd.isna(ortalama_hiz) or ortalama_hiz < 5.0:
+        durum_kategorisi = "VERI_YOK"
+    elif ortalama_hiz < 25.0 or kume_darbogaz_mi:
+        durum_kategorisi = "KIRMIZI"
+    elif ortalama_hiz < 40.0:
+        durum_kategorisi = "TURUNCU"
+    elif ortalama_hiz < 55.0:
+        durum_kategorisi = "SARI"
+    else:
+        durum_kategorisi = "YESIL"
+
+    # Metrik Kartı Renk ve Yön Ayarları
+    if durum_kategorisi == "VERI_YOK":
+        delta_val = None
+        delta_color = "off"
+    elif durum_kategorisi == "KIRMIZI":
+        delta_val = "Kilitli / Darboğaz"
+        delta_color = "normal"  # Eksi (-) kullanıldığı için Streamlit kırmızı renderlar
+    elif durum_kategorisi == "TURUNCU":
+        delta_val = "Yoğun Akış"
+        delta_color = "normal"  # Eksi (-) kırmızı
+    elif durum_kategorisi == "SARI":
+        delta_val = "Orta Seviye Akış"
+        delta_color = "normal"     # Yönsüz, nötr gri renk
+    else:
+        delta_val = "Akıcı Akış"
+        delta_color = "normal"  # Artı (+) yeşil
 
     # Metrik Kartı Gösterimi
     st.metric(
         label=f"{secilen_zaman} Saat Sonra {secilen_sokak} Durumu", 
         value=hiz_metni, 
-        delta="-Yoğun Darboğaz" if darbogaz_mi else ("Akıcı Akış" if pd.notna(ortalama_hiz) else "Veri Yok")
+        delta=delta_val,
+        delta_color=delta_color
     )
     
-    if darbogaz_mi:
-        st.error(f"🚨 KRİTİK UYARI: Sistem, {secilen_zaman} saat sonra **{secilen_sokak}** üzerinde K-Means Kilit kümesi saptamıştır. Trafik durma noktasına gelebilir.")
-    elif pd.isna(ortalama_hiz):
-        st.warning(f"⚠️ **{secilen_sokak}** güzergahı için veri setinde yeterli sensör bilgisi bulunmamaktadır.")
-    else:
-        st.success(f"✅ **{secilen_sokak}** güzergahının {secilen_zaman} saat sonra tamamen temiz ve akıcı olması öngörülmektedir.")
+    # 🌟 YENİ: Uyarı Kutuları Yönetimi (Renklere Özel)
+    if durum_kategorisi == "VERI_YOK":
+        st.warning(f"⚪ **{secilen_sokak}** güzergahı için sensör bilgisi bulunmamaktadır (veya hız 5 km/s altındadır).")
+    elif durum_kategorisi == "KIRMIZI":
+        st.error(f"🚨 KRİTİK (Koyu Kırmızı): {secilen_zaman} saat sonra **{secilen_sokak}** üzerinde trafik durma noktasına gelecektir. Alternatif rotaları değerlendirin! (Tahmini Hız: {ortalama_hiz:.1f} km/s)")
+    elif durum_kategorisi == "TURUNCU":
+        st.warning(f"⚠️ DİKKAT (Turuncu): **{secilen_sokak}** güzergahında belirgin bir yoğunluk bekleniyor. Seyahat süreniz uzayabilir. (Tahmini Hız: {ortalama_hiz:.1f} km/s)")
+    elif durum_kategorisi == "SARI":
+        st.info(f"ℹ️ BİLGİ (Mavi): **{secilen_sokak}** üzerinde akış devam ediyor ancak yer yer hafif yavaşlamalar görülebilir. (Tahmini Hız: {ortalama_hiz:.1f} km/s)")
+    else: # YESIL
+        st.success(f"✅ HARİKA (Yeşil): **{secilen_sokak}** güzergahının {secilen_zaman} saat sonra tamamen temiz ve akıcı olması öngörülmektedir.")
 
-    st.markdown("---")
-    st.info("💡 **Ablasyon Analizi Notu:** Sol panelden Daily veya Weekly bağlam onay kutularını kaldırarak modelin tahminlerinin nasıl değiştiğini ve döngüleri kaybetmenin simülasyonu nasıl bozduğunu canlı izleyebilirsiniz.")
+    
