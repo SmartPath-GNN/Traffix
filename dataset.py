@@ -1,51 +1,43 @@
 from torch.utils.data import Dataset
-
+import torch
 
 class TrafficSlidingWindowDataset(Dataset):
     """
-    Tüm x_seq verisini baştan oluşturmaz.
-    DataLoader örnek istedikçe geçmiş zaman penceresini anlık üretir.
-
-    data_x shape:
-        [Zaman, Düğüm, Özellik]
+    Kısa dönem (recent), günlük (daily) ve haftalık (weekly) zaman pencerelerini
+    ve horizon boyunca gelecek zaman dizisini anlık üretir.
     """
-
     def __init__(
         self,
         data_x,
-        window_size,
+        window_size,  # Kısa dönem / recent pencere boyutu (örn: 3)
         target_col_indices,
         start_index,
         end_index,
-        horizon=1
+        horizon=6     # Tahmin ufku boyunca üretilecek dizi adımı
     ):
         self.data_x = data_x
         self.window_size = window_size
         self.target_col_indices = target_col_indices
-        self.start_index = start_index
+        self.start_index = start_index  # Güvenli indeks artık train.py'den geliyor
         self.end_index = end_index
         self.horizon = horizon
 
     def __len__(self):
-        return self.end_index - self.start_index - self.window_size - self.horizon + 1
+        return self.end_index - self.start_index
 
     def __getitem__(self, index):
-        real_index = self.start_index + index
+        t = self.start_index + index
 
-        # X: geçmiş window_size kadar zaman adımı
-        x_window = self.data_x[
-            real_index : real_index + self.window_size
-        ]
+        # 1. Kısa Dönem (Recent)
+        x_recent = self.data_x[t - self.window_size : t]
+        
+        # 2. Günlük Dönem (Daily)
+        x_daily = self.data_x[t - 24 - (self.window_size // 2) : t - 24 + (self.window_size // 2) + (self.window_size % 2)]
+        
+        # 3. Haftalık Dönem (Weekly)
+        x_weekly = self.data_x[t - 168 - (self.window_size // 2) : t - 168 + (self.window_size // 2) + (self.window_size % 2)]
 
-        # y: pencerenin horizon kadar sonrasındaki zaman adımı
-        # horizon=1 ise hemen sonraki adımı tahmin eder.
-        # horizon=3 ise 3 adım sonrasını tahmin eder.
-        target_index = real_index + self.window_size + self.horizon - 1
+        # Y: Horizon boyunca hedef zaman dizisi
+        y_target = self.data_x[t : t + self.horizon, :, self.target_col_indices]
 
-        y_target = self.data_x[
-            target_index,
-            :,
-            self.target_col_indices
-        ]
-
-        return x_window, y_target
+        return x_recent, x_daily, x_weekly, y_target

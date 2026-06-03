@@ -2,3 +2,4 @@
 cache/
 __pycache__/
 gnn_lstm_dataset_6ay.pt
+*.pt

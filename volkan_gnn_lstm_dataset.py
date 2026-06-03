@@ -4,6 +4,7 @@ import time
 import torch      # PyTorch tensörleri için
 import numpy as np # Hızlı matris (vektörizasyon) işlemleri için
 import warnings
+import gc         # 🌟 YENİ: RAM temizliği için Garbage Collector
 
 # Pandas'ın ortalama alırken verebileceği gereksiz uyarıları gizler
 warnings.filterwarnings('ignore')
@@ -59,11 +60,9 @@ def veri_setini_hazirla():
     df = pd.read_csv('model_girdisi_son.csv')
     df['DATE_TIME'] = pd.to_datetime(df['DATE_TIME'])
     
+    print("   -> Zaman filtresi pasif: 2020-2024 arası TÜM VERİ işleniyor...")
     
-    print("   -> Zaman filtresi uygulanıyor (Sadece 2024 Temmuz'dan sonrası alınıyor)...")
-    df = df[df['DATE_TIME'] >= '2024-07-01'] 
-    
-    print("   ->Veri Şişmesini Önlemek İçin Zaman Gruplanıyor...")
+    print("   -> Veri Şişmesini Önlemek İçin Zaman Gruplanıyor...")
     # Zamanı saatlik yuvarlıyoruz (Örn: 08:14 ve 08:45 -> 08:00 olur)
     df['DATE_TIME'] = df['DATE_TIME'].dt.floor('1h')
     
@@ -81,24 +80,31 @@ def veri_setini_hazirla():
     print(f"   -> Gruplama Sonrası Benzersiz Saat Dilimi: {num_time_steps}")
     
     print("7. 3D LSTM Küpü (Spatio-Temporal Matris) oluşturuluyor...")
-    # Modelin beklediği [Zaman, Düğüm, Özellik] boyutlarında içi SIFIR olan bir matris
-    X_array = np.zeros((num_time_steps, num_nodes, num_features), dtype=np.float32)
     
     time_to_idx = {time_val: idx for idx, time_val in enumerate(unique_times)}
     
-    # Vektörizasyon: Hangi verinin küpte hangi XYZ koordinatına gideceğini buluyoruz
+    # Vektörizasyon: Numpy dizilerini çekiyoruz ki DataFrame'e ihtiyacımız kalmasın
     t_indices = df['DATE_TIME'].map(time_to_idx).values 
     n_indices = df['gnn_node_id'].values                
     features = df[feature_cols].values                  
     
+    # 🌟 KRİTİK RAM TEMİZLİĞİ: Pandas DataFrame'ini tamamen RAM'den siliyoruz
+    print("   -> RAM optimizasyonu: Gereksiz veriler temizleniyor...")
+    del df
+    gc.collect() # Python çöp toplayıcısını zorla çalıştır
+    
+    # Modelin beklediği [Zaman, Düğüm, Özellik] boyutlarında matris
+    # (Bu işlem yaklaşık 6.3 GB RAM alacak, o yüzden öncesini temizledik)
+    X_array = np.zeros((num_time_steps, num_nodes, num_features), dtype=np.float32)
+    
     # Tüm veriyi küpün içine tek seferde yerleştiriyoruz
     X_array[t_indices, n_indices, :] = features
     
-    # Numpy matrisini nihai PyTorch Float Tensörüne çeviriyoruz
-    x_tensor = torch.tensor(X_array, dtype=torch.float32)
+    # 🌟 KRİTİK ZERO-COPY İŞLEMİ: RAM'de ikinci bir kopya oluşturmamak için from_numpy kullanıyoruz
+    x_tensor = torch.from_numpy(X_array)
     
     print("8. Tüm Veriler Modele Beslenmeye Hazır '.pt' Dosyası Olarak Kaydediliyor...")
-    dataset_path = 'gnn_lstm_dataset_6ay.pt'
+    dataset_path = 'gnn_lstm_dataset_tam_veri.pt'
     torch.save({
         'x': x_tensor, 
         'edge_index': edge_index_tensor,
